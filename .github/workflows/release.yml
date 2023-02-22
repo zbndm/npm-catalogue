@@ -1,0 +1,59 @@
+name: CI Release
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    environment: 
+      name: this
+      url: https://github.com/ka9an/denopendabot
+
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Configure git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - run: git fetch --prune --unshallow
+
+      - name: Install dependencies
+        run: npm install -g pnpm @o6/automatic-versioning@1.0.8 && pnpm install --production --ignore-scripts
+      
+      - name: Create .npmrc
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_ORG }}" > .npmrc
+        
+      - run: echo "git-checks=false" >> .npmrc
+
+      - name: Populate prerequisities
+        run: cd packages && for p in *; do if [ -d "$p" ]; then cp ../.npmignore ../LICENSE $p/; fi; done && cd ..
+          
+      - name: Publish package on NPM
+        run: pnpm release
+
+      - name: Update release info
+        run: |
+          lastCommit=$(git log -1 --pretty=%B)
+          releasePrefix=(${lastCommit//:/ })
+          release="patch"
+          if [ "$releasePrefix" == "FEAT!" -o "$releasePrefix" == "Feat!" ]; then
+              release="major"
+          elif [ "$releasePrefix" == "FEAT" -o "$releasePrefix" == "Feat" ]; then
+              release="minor"   
+          fi
+          git config pull.ff true
+          git add . && git commit -m "CI: @o6/automatic-versioning - $release release" || true
+          git pull && git push origin main
